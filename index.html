@@ -31,7 +31,6 @@
     <button id="btn-bluetooth" onclick="conectarBluetooth()">1. Conectar con Pico W</button>
 
     <div id="estado" class="normal">Esperando rostro...</div>
-    <p>EAR Promedio: <span id="ear_val">0.00</span></p>
     
     <video id="video_input" autoplay playsinline></video>
     <canvas id="output_canvas" width="640" height="480"></canvas>
@@ -49,7 +48,7 @@
 
                 // 1. Pedir al navegador que busque dispositivos con el nombre específico
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'Pico-Somnolencia' }],
+                    filters: [{ name: 'Raspberry' }],
                     optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e'] // UUID del servicio
                 });
 
