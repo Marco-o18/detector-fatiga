@@ -1,168 +1,24 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Detector de Fatiga BLE</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-    <style>
-        body { font-family: sans-serif; background-color: #222; color: white; text-align: center; margin: 0; padding: 20px; }
-        video { display: none; } 
-        canvas { max-width: 100%; border: 3px solid #555; border-radius: 10px; margin-top: 15px; }
-        #estado { font-size: 24px; font-weight: bold; padding: 15px; margin-top: 10px; border-radius: 5px; }
-        .alerta { background-color: #ff3333; color: white; }
-        .normal { background-color: #33cc33; color: white; }
+async function enviarComando(valorString) {
+    // 1. Si no hay una conexión Bluetooth activa, salimos silenciosamente sin congelar nada
+    if (!bleCharacteristic) {
+        console.log("Intento de envío sin conexión Bluetooth activa: ", valorString);
+        return; 
+    }
+    
+    try {
+        const encoder = new TextEncoder();
+        // 2. Intentamos enviar el dato de forma asíncrona
+        await bleCharacteristic.writeValue(encoder.encode(valorString));
+        console.log("Comando enviado con éxito: ", valorString);
+    } catch (err) {
+        // 3. Si la tablet se desconectó o falló el envío por interferencia, 
+        // atrapamos el error aquí para que la cámara SIGA FUNCIONANDO normalmente.
+        console.error("Error al enviar dato por Bluetooth, limpiando conexión: ", err);
         
-        /* Estilos del botón Bluetooth */
-        #btn-bluetooth {
-            background-color: #007bff; color: white; border: none;
-            padding: 15px 30px; font-size: 18px; border-radius: 8px;
-            cursor: pointer; font-weight: bold; margin-bottom: 15px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-        #btn-bluetooth.conectado { background-color: #28a745; }
-    </style>
-</head>
-<body>
-
-    <h2>Sistema de Fatiga Inalámbrico</h2>
-    
-    <button id="btn-bluetooth" onclick="conectarBluetooth()">1. Conectar con Pico W</button>
-
-    <div id="estado" class="normal">Esperando rostro...</div>
-    
-    <video id="video_input" autoplay playsinline></video>
-    <canvas id="output_canvas" width="640" height="480"></canvas>
-
-    <script>
-        // -----------------------------------------
-        // LÓGICA DE BLUETOOTH (BLE)
-        // -----------------------------------------
-        let bleCharacteristic = null;
-
-        async function conectarBluetooth() {
-            try {
-                const btn = document.getElementById('btn-bluetooth');
-                btn.innerText = "Buscando...";
-
-                // 1. Pedir al navegador que busque dispositivos con el nombre específico
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'Raspberry' }],
-                    optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e'] // UUID del servicio
-                });
-
-                // 2. Conectar al servidor GATT del dispositivo
-                const server = await device.gatt.connect();
-
-                // 3. Obtener el servicio y la característica de escritura
-                const service = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
-                bleCharacteristic = await service.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
-
-                // Éxito visual en el botón
-                btn.innerText = "¡Bluetooth Conectado!";
-                btn.classList.add("conectado");
-                console.log("Conectado y listo para enviar comandos.");
-
-            } catch (error) {
-                console.error("Error de Bluetooth: ", error);
-                document.getElementById('btn-bluetooth').innerText = "Error (Reintentar)";
-            }
-        }
-
-        function enviarComando(valorString) {
-            if (!bleCharacteristic) return; // Si no hay Bluetooth conectado, no hacer nada
-            
-            const encoder = new TextEncoder();
-            bleCharacteristic.writeValue(encoder.encode(valorString))
-                .catch(err => console.error("Error al enviar dato: ", err));
-        }
-
-        // -----------------------------------------
-        // LÓGICA DE MEDIAPIPE Y SOMNOLENCIA
-        // -----------------------------------------
-        const videoElement = document.getElementById('video_input');
-        const canvasElement = document.getElementById('output_canvas');
-        const canvasCtx = canvasElement.getContext('2d');
-        const estadoDiv = document.getElementById('estado');
-        const earSpan = document.getElementById('ear_val');
-
-        const EAR_THRESHOLD = 0.23;
-        const FRAMES_CERRADOS = 15;
-        let contador_ojos_cerrados = 0;
-        let estado_alarma = false;
-
-        const LEFT_EYE = [33, 160, 158, 133, 153, 144];
-        const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
-
-        function distancia(p1, p2) {
-            return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-        }
-
-        function calcular_ear(ojo_indices, landmarks) {
-            const p1 = landmarks[ojo_indices[0]], p2 = landmarks[ojo_indices[1]];
-            const p3 = landmarks[ojo_indices[2]], p4 = landmarks[ojo_indices[3]];
-            const p5 = landmarks[ojo_indices[4]], p6 = landmarks[ojo_indices[5]];
-            const horizontal = distancia(p1, p4);
-            if (horizontal === 0) return 0;
-            return (distancia(p2, p6) + distancia(p3, p5)) / (2.0 * horizontal);
-        }
-
-        const faceMesh = new FaceMesh({locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
-        }});
-
-        faceMesh.setOptions({
-            maxNumFaces: 1, refineLandmarks: true,
-            minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
-        });
-
-        faceMesh.onResults(function(results) {
-            canvasCtx.save();
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-                const landmarks = results.multiFaceLandmarks[0];
-
-                const ear_izq = calcular_ear(LEFT_EYE, landmarks);
-                const ear_der = calcular_ear(RIGHT_EYE, landmarks);
-                const ear_promedio = (ear_izq + ear_der) / 2.0;
-
-                earSpan.innerText = ear_promedio.toFixed(2);
-
-                if (ear_promedio < EAR_THRESHOLD) {
-                    contador_ojos_cerrados++;
-                } else {
-                    contador_ojos_cerrados = 0;
-                }
-
-                if (contador_ojos_cerrados >= FRAMES_CERRADOS) {
-                    estadoDiv.innerText = "¡SOMNOLENCIA DETECTADA!";
-                    estadoDiv.className = "alerta";
-                    
-                    if (!estado_alarma) {
-                        enviarComando('1'); // Enviar "1" por Bluetooth
-                        estado_alarma = true;
-                    }
-                } else {
-                    estadoDiv.innerText = "Estado: Alerta normal";
-                    estadoDiv.className = "normal";
-                    
-                    if (estado_alarma) {
-                        enviarComando('0'); // Enviar "0" por Bluetooth
-                        estado_alarma = false;
-                    }
-                }
-            }
-            canvasCtx.restore();
-        });
-
-        const camera = new Camera(videoElement, {
-            onFrame: async () => { await faceMesh.send({image: videoElement}); },
-            width: 640, height: 480
-        });
-        camera.start();
-    </script>
-</body>
-</html>
+        // Reseteamos las variables de estado para obligar a reconectar si falla
+        bleCharacteristic = null;
+        const btn = document.getElementById('btn-bluetooth');
+        btn.innerText = "Conexión Perdida (Reconectar)";
+        btn.classList.remove("conectado");
+    }
+}
