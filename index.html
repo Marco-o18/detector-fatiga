@@ -2,24 +2,73 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Detector de Fatiga BLE</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
     <style>
-        body { font-family: sans-serif; background-color: #222; color: white; text-align: center; margin: 0; padding: 20px; }
+        body { 
+            font-family: sans-serif; 
+            background-color: #222; 
+            color: white; 
+            text-align: center; 
+            margin: 0; 
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        
+        h2 {
+            font-size: 1.5rem;
+            margin: 10px 0;
+        }
+
         video { display: none; } 
-        canvas { max-width: 100%; border: 3px solid #555; border-radius: 10px; margin-top: 15px; }
-        #estado { font-size: 24px; font-weight: bold; padding: 15px; margin-top: 10px; border-radius: 5px; }
+        
+        /* Contenedor adaptativo para el Canvas */
+        .canvas-container {
+            width: 100%;
+            max-width: 640px;
+            margin: 15px auto;
+            position: relative;
+        }
+
+        canvas { 
+            width: 100%; 
+            height: auto; 
+            border: 3px solid #555; 
+            border-radius: 10px; 
+            background-color: #111;
+            /* Efecto espejo para que sea natural al verse en el auto */
+            transform: scaleX(-1); 
+        }
+        
+        #estado { 
+            font-size: 1.3rem; 
+            font-weight: bold; 
+            padding: 12px; 
+            margin: 10px auto; 
+            border-radius: 5px;
+            max-width: 640px;
+        }
+        
         .alerta { background-color: #ff3333; color: white; }
         .normal { background-color: #33cc33; color: white; }
         
-        /* Estilos del botón Bluetooth */
+        /* Estilos optimizados del botón Bluetooth */
         #btn-bluetooth {
-            background-color: #007bff; color: white; border: none;
-            padding: 15px 30px; font-size: 18px; border-radius: 8px;
-            cursor: pointer; font-weight: bold; margin-bottom: 15px;
+            background-color: #007bff; 
+            color: white; 
+            border: none;
+            padding: 12px 24px; 
+            font-size: 1rem; 
+            border-radius: 8px;
+            cursor: pointer; 
+            font-weight: bold; 
+            margin-bottom: 5px;
+            width: 100%;
+            max-width: 640px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: background-color 0.3s;
         }
         #btn-bluetooth.conectado { background-color: #28a745; }
     </style>
@@ -33,7 +82,10 @@
     <div id="estado" class="normal">Esperando rostro...</div>
     
     <video id="video_input" autoplay playsinline></video>
-    <canvas id="output_canvas" width="640" height="480"></canvas>
+    
+    <div class="canvas-container">
+        <canvas id="output_canvas" width="640" height="480"></canvas>
+    </div>
 
     <script>
         // -----------------------------------------
@@ -46,20 +98,15 @@
                 const btn = document.getElementById('btn-bluetooth');
                 btn.innerText = "Buscando...";
 
-                // 1. Pedir al navegador que busque la Pico W
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ name: 'Pico-Somnolencia' }],
                     optionalServices: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e']
                 });
 
-                // 2. Conectar al servidor GATT
                 const server = await device.gatt.connect();
-
-                // 3. Obtener el servicio y la característica de escritura RX
                 const service = await server.getPrimaryService('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
                 bleCharacteristic = await service.getCharacteristic('6e400002-b5a3-f393-e0a9-e50e24dcca9e');
 
-                // Éxito visual
                 btn.innerText = "¡Bluetooth Conectado!";
                 btn.classList.add("conectado");
                 console.log("Conectado con éxito a la Pico W.");
@@ -70,9 +117,8 @@
             }
         }
 
-        // Función asíncrona y segura para evitar congelamientos de pantalla
         async function enviarComando(valorString) {
-            if (!bleCharacteristic) return; // Si no hay conexión, ignora el envío y no congela la cámara
+            if (!bleCharacteristic) return; 
             
             try {
                 const encoder = new TextEncoder();
@@ -80,8 +126,6 @@
                 console.log("Enviado: ", valorString);
             } catch (err) {
                 console.error("Error de transmisión, limpiando estado: ", err);
-                
-                // Si se pierde el enlace de radio, restablecemos el botón para avisar al usuario
                 bleCharacteristic = null;
                 const btn = document.getElementById('btn-bluetooth');
                 btn.innerText = "Conexión Perdida (Reconectar)";
@@ -97,13 +141,11 @@
         const canvasCtx = canvasElement.getContext('2d');
         const estadoDiv = document.getElementById('estado');
 
-        // Configuración de umbrales
         const EAR_THRESHOLD = 0.23;
         const FRAMES_CERRADOS = 15;
         let contador_ojos_cerrados = 0;
         let estado_alarma = false;
 
-        // Puntos de los ojos en MediaPipe
         const LEFT_EYE = [33, 160, 158, 133, 153, 144];
         const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
 
@@ -137,7 +179,6 @@
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                 const landmarks = results.multiFaceLandmarks[0];
 
-                // Dibujar puntos de los ojos en el Canvas para retroalimentación visual
                 canvasCtx.fillStyle = '#00FF00';
                 [...LEFT_EYE, ...RIGHT_EYE].forEach(idx => {
                     const lm = landmarks[idx];
@@ -146,19 +187,16 @@
                     canvasCtx.fill();
                 });
 
-                // Calcular el promedio del EAR
                 const ear_izq = calcular_ear(LEFT_EYE, landmarks);
                 const ear_der = calcular_ear(RIGHT_EYE, landmarks);
                 const ear_promedio = (ear_izq + ear_der) / 2.0;
 
-                // Lógica de validación temporal (Filtrado de parpadeos)
                 if (ear_promedio < EAR_THRESHOLD) {
                     contador_ojos_cerrados++;
                 } else {
                     contador_ojos_cerrados = 0;
                 }
 
-                // Manejo de estados de alerta y envío BLE
                 if (contador_ojos_cerrados >= FRAMES_CERRADOS) {
                     estadoDiv.innerText = "¡SOMNOLENCIA DETECTADA!";
                     estadoDiv.className = "alerta";
@@ -183,7 +221,6 @@
             canvasCtx.restore();
         });
 
-        // Inicialización y arranque de la cámara nativa de la tablet
         const camera = new Camera(videoElement, {
             onFrame: async () => { await faceMesh.send({image: videoElement}); },
             width: 640, height: 480
